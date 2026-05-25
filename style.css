@@ -322,6 +322,18 @@ a   { text-decoration: none; color: inherit; }
     font-style: italic;
 }
 
+.map-link {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--text-light);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 0.2s;
+}
+
+.map-link:hover {
+    text-decoration-color: var(--text);
+}
+
 /* ─────────────────────────────────────────────────────────────── */
 /* ACHIEVEMENTS                                                   */
 /* ─────────────────────────────────────────────────────────────── */
