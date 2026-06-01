@@ -678,6 +678,53 @@ a   { text-decoration: none; color: inherit; }
 }
 
 /* ─────────────────────────────────────────────────────────────── */
+/* HASHTAG                                                        */
+/* ─────────────────────────────────────────────────────────────── */
+.hashtag-wrap {
+    margin: 28px auto 0;
+    text-align: center;
+}
+
+.hashtag-tag {
+    display: inline-block;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    font-style: italic;
+    color: var(--gold);
+    letter-spacing: 0.02em;
+    border: 1.5px solid rgba(201, 162, 39, 0.35);
+    border-radius: 100px;
+    padding: 14px 36px;
+    background: rgba(201, 162, 39, 0.06);
+    user-select: all;
+    cursor: copy;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.hashtag-tag:hover {
+    background: rgba(201, 162, 39, 0.12);
+    border-color: var(--gold);
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+/* VIDEO EMBED (Watch Live)                                       */
+/* ─────────────────────────────────────────────────────────────── */
+.video-wrap {
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    margin-top: 28px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+    background: #000;
+    position: relative;
+}
+
+.video-wrap iframe {
+    display: block;
+    width: 100%;
+    border: none;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
 /* FOOTER                                                         */
 /* ─────────────────────────────────────────────────────────────── */
 .site-footer {
