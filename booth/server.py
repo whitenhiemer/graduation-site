@@ -18,8 +18,31 @@ PHOTOS_DIR.mkdir(exist_ok=True)
 
 STATIC_DIR = Path(__file__).parent
 
+# -- AI style processing (optional — set GEMINI_API_KEY to enable) --
+STYLE_ENABLED = False
+STYLE_PROMPT = os.getenv(
+    "BOOTH_STYLE_PROMPT",
+    "Transform this photo into a vintage instant-film style with warm tones, "
+    "slight vignette, and soft grain. Keep the subjects and composition identical."
+)
 
-# ── WebSocket hub ────────────────────────────────────────────────────────────
+try:
+    from google import genai
+    from google.genai import types
+    from dotenv import load_dotenv
+    load_dotenv()
+    _api_key = os.getenv("GEMINI_API_KEY")
+    if _api_key:
+        _genai_client = genai.Client(api_key=_api_key)
+        STYLE_ENABLED = True
+        print(f"[style] AI style processing enabled (prompt: {STYLE_PROMPT[:60]}...)")
+    else:
+        print("[style] GEMINI_API_KEY not set — AI style disabled, using polaroid frame only")
+except ImportError:
+    print("[style] google-genai not installed — AI style disabled")
+
+
+# -- WebSocket hub --
 
 class Hub:
     def __init__(self):
@@ -47,7 +70,7 @@ class Hub:
 hub = Hub()
 
 
-# ── Polaroid effect ──────────────────────────────────────────────────────────
+# -- Polaroid effect --
 
 def _load_font(size: int):
     candidates = [
@@ -68,18 +91,14 @@ def _load_font(size: int):
 def decode_frame(body: bytes, content_type: str, width: int, height: int) -> Image.Image:
     """Accept JPEG or raw RGB565 bytes from K10, return PIL Image."""
     if "rgb565" in content_type:
-        # K10 camera_capture() returns raw BGR565 (little-endian)
         img = Image.frombuffer("RGB", (width, height), body, "raw", "BGR;16", 0, 1)
     else:
         img = Image.open(io.BytesIO(body))
     return img.convert("RGB")
 
 
-def make_polaroid(jpeg_bytes: bytes, caption: str,
-                  content_type: str = "image/jpeg",
-                  width: int = 240, height: int = 320) -> bytes:
-    img = decode_frame(jpeg_bytes, content_type, width, height)
-
+def make_polaroid(img: Image.Image, caption: str) -> bytes:
+    """Apply polaroid frame to a PIL Image, return JPEG bytes."""
     # Center-crop to 3:4 portrait
     w, h = img.size
     target_ratio = 3 / 4
@@ -111,14 +130,91 @@ def make_polaroid(jpeg_bytes: bytes, caption: str,
     return out.getvalue()
 
 
-# ── Routes ───────────────────────────────────────────────────────────────────
+def apply_vintage_filter(img: Image.Image) -> Image.Image:
+    """Apply a vintage instant-film look: warm tones, subtle vignette, film grain."""
+    from PIL import ImageFilter, ImageEnhance
+
+    img = img.copy()
+    w, h = img.size
+
+    # Warm color shift (boost reds/yellows, reduce blues)
+    r, g, b = img.split()
+    r = r.point(lambda x: min(255, int(x * 1.08)))
+    g = g.point(lambda x: min(255, int(x * 1.02)))
+    b = b.point(lambda x: int(x * 0.88))
+    img = Image.merge("RGB", (r, g, b))
+
+    # Slight contrast reduction + warmth (mimics film)
+    img = ImageEnhance.Contrast(img).enhance(0.92)
+    img = ImageEnhance.Color(img).enhance(0.9)
+    img = ImageEnhance.Brightness(img).enhance(1.03)
+
+    # Subtle vignette — radial gradient mask (white center fading to dark edges)
+    import math
+    vignette = Image.new("L", (w, h), 255)
+    cx, cy = w / 2, h / 2
+    max_dist = math.sqrt(cx * cx + cy * cy)
+    pixels = vignette.load()
+    for y in range(h):
+        for x in range(w):
+            dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+            # Start darkening at 60% of max distance, darken to 70% brightness at edges
+            factor = max(0, (dist / max_dist - 0.6) / 0.4)
+            pixels[x, y] = int(255 * (1 - factor * 0.3))
+    img = Image.composite(img, Image.new("RGB", (w, h), (15, 10, 5)), vignette)
+
+    # Film grain overlay
+    grain = Image.effect_noise((w, h), 20).convert("RGB")
+    img = Image.blend(img, grain, 0.04)
+
+    return img
+
+
+async def apply_ai_style(img: Image.Image) -> Image.Image | None:
+    """Run image through Gemini for AI style transfer, or Pillow vintage filter as fallback."""
+    if STYLE_ENABLED:
+        try:
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format="JPEG", quality=90)
+            img_bytes.seek(0)
+
+            image_part = types.Part.from_bytes(data=img_bytes.getvalue(), mime_type="image/jpeg")
+
+            response = await asyncio.to_thread(
+                _genai_client.models.generate_content,
+                model="gemini-2.5-flash-image",
+                contents=[STYLE_PROMPT, image_part],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "inline_data") and part.inline_data and part.inline_data.mime_type.startswith("image/"):
+                    print("[style] AI style applied via Gemini")
+                    return Image.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+
+            print("[style] No image in Gemini response — falling back to vintage filter")
+        except Exception as e:
+            print(f"[style] Gemini failed: {type(e).__name__} — using vintage filter")
+
+    # Pillow vintage filter (always available, instant)
+    return apply_vintage_filter(img)
+
+
+# -- Routes --
 
 @app.post("/upload")
 async def upload(request: Request):
     body = await request.body()
     content_type = request.headers.get("content-type", "image/jpeg")
     cam_id = request.headers.get("X-Cam-Id", "cam0")
-    event = request.headers.get("X-Event", "Ender · Class of 2026")
+    event = request.headers.get("X-Event", "Ender's Graduation - June 2026")
+    # Fix encoding: K10 sends raw UTF-8 bytes which HTTP headers interpret as Latin-1
+    try:
+        event = event.encode("latin-1").decode("utf-8")
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
     width = int(request.headers.get("X-Width", "240"))
     height = int(request.headers.get("X-Height", "320"))
 
@@ -126,11 +222,41 @@ async def upload(request: Request):
     filename = f"{ts}_{cam_id}.jpg"
     filepath = PHOTOS_DIR / filename
 
-    polaroid = make_polaroid(body, event, content_type, width, height)
-    filepath.write_bytes(polaroid)
+    # Decode the raw frame
+    img = decode_frame(body, content_type, width, height)
 
+    # Save raw original immediately
+    raw_path = PHOTOS_DIR / f"{ts}_{cam_id}_raw.jpg"
+    raw_buf = io.BytesIO()
+    img.save(raw_buf, "JPEG", quality=92)
+    raw_path.write_bytes(raw_buf.getvalue())
+
+    # Save clean polaroid (frame only, no style) immediately
+    clean_polaroid = make_polaroid(img, event)
+    clean_path = PHOTOS_DIR / f"{ts}_{cam_id}_clean.jpg"
+    clean_path.write_bytes(clean_polaroid)
+
+    # Write clean polaroid as the initial gallery version (instant feedback)
+    filepath.write_bytes(clean_polaroid)
     await hub.broadcast({"photo": filename, "cam": cam_id})
+
+    # Apply AI style in background — overwrites the gallery file when done
+    asyncio.create_task(_style_and_replace(img, event, filepath, filename, cam_id))
+
     return {"ok": True, "filename": filename}
+
+
+async def _style_and_replace(img: Image.Image, event: str, filepath: Path, filename: str, cam_id: str):
+    """Background task: apply AI style and replace the gallery polaroid."""
+    try:
+        styled_img = await apply_ai_style(img)
+        if styled_img is not None:
+            polaroid = make_polaroid(styled_img, event)
+            filepath.write_bytes(polaroid)
+            # Notify gallery to refresh this photo
+            await hub.broadcast({"photo": filename, "cam": cam_id, "updated": True})
+    except Exception as e:
+        print(f"[style-bg] error: {e}")
 
 
 @app.get("/")
@@ -153,15 +279,28 @@ async def get_photo(filename: str):
 
 @app.get("/api/photos")
 async def list_photos():
-    photos = sorted(PHOTOS_DIR.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
+    # Only return styled polaroids (exclude _raw and _clean backups)
+    photos = sorted(
+        [p for p in PHOTOS_DIR.glob("*.jpg") if "_raw" not in p.name and "_clean" not in p.name],
+        key=lambda p: p.stat().st_mtime,
+    )
     return [p.name for p in photos]
+
+
+@app.get("/api/style")
+async def get_style():
+    """Check AI style status and current prompt."""
+    return {"enabled": STYLE_ENABLED, "prompt": STYLE_PROMPT}
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await hub.connect(ws)
-    # Send all existing photos on connect (newest first so prepend = correct order)
-    photos = sorted(PHOTOS_DIR.glob("*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True)
+    photos = sorted(
+        [p for p in PHOTOS_DIR.glob("*.jpg") if "_raw" not in p.name and "_clean" not in p.name],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     for photo in photos:
         try:
             await ws.send_json({"photo": photo.name, "cam": "existing", "existing": True})
