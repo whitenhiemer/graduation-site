@@ -77,27 +77,56 @@
         </div>
     </section>
 
-    <!-- WATCH LIVE (June 13, 3–5 PM PT — replace VIDEO_ID after scheduling stream) -->
+    <!-- WATCH LIVE -->
     <section class="ceremony" id="livestream">
         <div class="container">
             <h2 class="section-title">Watch Live</h2>
             <p class="section-sub">Streaming live from Angel of the Winds Arena &nbsp;&middot;&nbsp; June&nbsp;13, 3&nbsp;PM&nbsp;PT</p>
-            <div class="video-wrap">
-                <!-- Replace VIDEO_ID with the YouTube Live video ID from YouTube Studio -->
-                <iframe
-                    width="100%" height="450"
-                    src="https://www.youtube.com/embed/VIDEO_ID?autoplay=1&rel=0"
-                    title="Robert Ender Woodward — Graduation Ceremony Live Stream"
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    allowfullscreen
-                    loading="lazy">
-                </iframe>
+            <div class="video-wrap" id="stream-wrap">
+                <!-- VIDEO_ID is set to null until the stream is scheduled -->
+                <!-- Replace VIDEO_ID below with the YouTube video ID from Studio, then redeploy -->
+                <div id="stream-container"></div>
             </div>
-            <p class="section-sub" style="margin-top:14px;font-size:0.8rem;">
-                Can&rsquo;t watch live? The recording will be available here after the ceremony.
-            </p>
+            <p class="section-sub" style="margin-top:14px;font-size:0.8rem;" id="stream-note"></p>
         </div>
     </section>
+    <script>
+    (function() {
+        var VIDEO_ID = null; // <-- paste YouTube video ID here when stream is scheduled
+        var STREAM_START = new Date('2026-06-13T22:00:00Z'); // 3 PM PT = 22:00 UTC
+        var STREAM_END   = new Date('2026-06-14T00:00:00Z'); // 5 PM PT = 00:00 UTC next day
+        var container = document.getElementById('stream-container');
+        var note = document.getElementById('stream-note');
+        var now = new Date();
+
+        if (VIDEO_ID) {
+            // Stream scheduled — show iframe
+            var params = now >= STREAM_START && now <= STREAM_END
+                ? '?autoplay=1&rel=0'
+                : '?rel=0';
+            container.innerHTML = '<iframe width="100%" height="450" src="https://www.youtube.com/embed/' + VIDEO_ID + params + '" title="Robert Ender Woodward — Graduation Ceremony Live Stream" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+            if (now < STREAM_START) {
+                note.textContent = 'Stream goes live June 13 at 3 PM PT. This page will auto-play when the ceremony begins.';
+            } else if (now > STREAM_END) {
+                note.textContent = 'The ceremony has ended. The recording is available above.';
+            }
+        } else {
+            // Not yet scheduled — show countdown placeholder
+            var msLeft = STREAM_START - now;
+            var days = Math.floor(msLeft / 86400000);
+            var hrs  = Math.floor((msLeft % 86400000) / 3600000);
+            container.innerHTML =
+                '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+                'height:320px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);' +
+                'border-radius:12px;gap:16px;padding:32px;">' +
+                '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>' +
+                '<p style="margin:0;font-size:1.1rem;font-weight:600;color:#fff;">Stream starts in ' + days + 'd ' + hrs + 'h</p>' +
+                '<p style="margin:0;font-size:0.85rem;color:rgba(255,255,255,0.5);">June 13 &middot; 3:00 PM PT &middot; Angel of the Winds Arena</p>' +
+                '</div>';
+            note.textContent = "Can’t make it? The recording will be available here after the ceremony.";
+        }
+    })();
+    </script>
 
     <!-- GRADUATION PARTY -->
     <section class="ceremony" id="party">
